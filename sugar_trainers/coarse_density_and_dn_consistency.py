@@ -104,7 +104,7 @@ def coarse_training_with_density_regularization_and_dn_consistency(args):
     detect_anomaly = False
 
     # -----Data parameters-----
-    downscale_resolution_factor = 1  # 2, 4
+    downscale_resolution_factor = 2  # 2, 4
 
     # -----Model parameters-----
     use_eval_split = True
@@ -317,10 +317,18 @@ def coarse_training_with_density_regularization_and_dn_consistency(args):
     # ====================End of parameters====================
 
     if args.output_dir is None:
-        if len(args.scene_path.split("/")[-1]) > 0:
-            args.output_dir = os.path.join("./output/coarse", args.scene_path.split("/")[-1])
+        # Use os.path.basename to get the scene name, handling both / and \ separators
+        scene_name = os.path.basename(os.path.normpath(args.scene_path))
+        if len(scene_name) == 0:
+            # If basename is empty, try the parent directory
+            scene_name = os.path.basename(os.path.dirname(os.path.normpath(args.scene_path)))
+        if len(scene_name) > 0:
+            args.output_dir = os.path.join("./output/coarse", scene_name)
         else:
-            args.output_dir = os.path.join("./output/coarse", args.scene_path.split("/")[-2])
+            # Fallback: use a hash of the path as directory name
+            import hashlib
+            scene_hash = hashlib.md5(args.scene_path.encode()).hexdigest()[:8]
+            args.output_dir = os.path.join("./output/coarse", f"scene_{scene_hash}")
             
     source_path = args.scene_path
     gs_checkpoint_path = args.checkpoint_path

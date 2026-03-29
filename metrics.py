@@ -150,9 +150,12 @@ if __name__ == "__main__":
     result_file_dir = './output/metrics/'
     os.makedirs(result_file_dir, exist_ok=True)
     results = {}
-    
+
     for source_path in gs_checkpoints_eval.keys():
-        scene_name = source_path.split('/')[-1]
+        # Get scene name properly, handling both / and \ separators
+        scene_name = os.path.basename(os.path.normpath(source_path))
+        if len(scene_name) == 0:
+            scene_name = os.path.basename(os.path.dirname(os.path.normpath(source_path)))
         CONSOLE.print(f"\n===== Processing scene {scene_name}... =====")
         scene_results = {}
         
@@ -310,15 +313,23 @@ if __name__ == "__main__":
                             
                             # Loading mesh
                             CONSOLE.print(f"\nProcessing Surface level: {surface_level}, Decimation target: {decimation_target}, Refinement iterations: {refinement_iterations}...")
-                            
+
+                            # Extract checkpoint directory name properly
+                            # sugar_checkpoint_path is a file path like ".../checkpoint_dir/15000.pt"
+                            # We need to extract "checkpoint_dir"
+                            checkpoint_parent = os.path.dirname(os.path.normpath(sugar_checkpoint_path))
+                            checkpoint_dir = os.path.basename(checkpoint_parent)
+                            if checkpoint_dir.startswith('sugarcoarse_'):
+                                checkpoint_dir = checkpoint_dir.replace('sugarcoarse_', '', 1)
+
                             if use_marching_cubes:
                                 CONSOLE.print("Using Marching Cubes for mesh extraction.")
-                                sugar_mesh_path = 'sugarmesh_' + sugar_checkpoint_path.split('/')[-2].replace('sugarcoarse_', '') + 'marchingcubes_levelZZ_decimAA.ply'
+                                sugar_mesh_path = f'sugarmesh_{checkpoint_dir}marchingcubes_levelZZ_decimAA.ply'
                             elif use_poisson_center:
                                 CONSOLE.print("Using Poisson Center for mesh extraction.")
-                                sugar_mesh_path = 'sugarmesh_' + sugar_checkpoint_path.split('/')[-2].replace('sugarcoarse_', '') + '_poissoncenters_decimAA.ply'
-                            else:                        
-                                sugar_mesh_path = 'sugarmesh_' + sugar_checkpoint_path.split('/')[-2].replace('sugarcoarse_', '') + '_levelZZ_decimAA.ply'
+                                sugar_mesh_path = f'sugarmesh_{checkpoint_dir}_poissoncenters_decimAA.ply'
+                            else:
+                                sugar_mesh_path = f'sugarmesh_{checkpoint_dir}_levelZZ_decimAA.ply'
                             sugar_mesh_path = sugar_mesh_path.replace(
                                 'ZZ', str(surface_level).replace('.', '')
                                 ).replace(
@@ -340,7 +351,7 @@ if __name__ == "__main__":
                                 )
                             refined_sugar_path = os.path.join(refined_sugar_path, f'{refinement_iterations}.pt')
                             CONSOLE.print(f"Loading SuGaR model config {refined_sugar_path}...")
-                            checkpoint = torch.load(refined_sugar_path, map_location=nerfmodel_30k.device)
+                            checkpoint = torch.load(refined_sugar_path, map_location=nerfmodel_30k.device, weights_only=False)
                             refined_sugar = SuGaR(
                                 nerfmodel=nerfmodel_30k,
                                 points=checkpoint['state_dict']['_points'],

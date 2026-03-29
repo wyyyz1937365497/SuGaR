@@ -119,9 +119,10 @@ if __name__ == "__main__":
         # Trains a 3DGS scene for 7k iterations
         white_background_str = '-w ' if args.white_background else ''
         os.system(
-            f"CUDA_VISIBLE_DEVICES={args.gpu} python ./gaussian_splatting/train.py \
+            f"python ./gaussian_splatting/train.py \
                 -s {args.scene_path} \
                 -m {gs_checkpoint_dir} \
+                --resolution 2 \
                 {white_background_str}\
                 --iterations 7_000"
         )

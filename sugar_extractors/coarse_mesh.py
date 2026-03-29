@@ -66,13 +66,21 @@ def extract_mesh_from_coarse_sugar(args):
         decimation_targets = [200_000, 1_000_000]
     else:
         decimation_targets = [args.decimation_target]
-    
+
     # Mesh output dir
     if args.mesh_output_dir is None:
-        if len(args.scene_path.split("/")[-1]) > 0:
-            args.mesh_output_dir = os.path.join("./output/coarse_mesh", args.scene_path.split("/")[-1])
+        # Use os.path.basename to get the scene name, handling both / and \ separators
+        scene_name = os.path.basename(os.path.normpath(args.scene_path))
+        if len(scene_name) == 0:
+            # If basename is empty, try the parent directory
+            scene_name = os.path.basename(os.path.dirname(os.path.normpath(args.scene_path)))
+        if len(scene_name) > 0:
+            args.mesh_output_dir = os.path.join("./output/coarse_mesh", scene_name)
         else:
-            args.mesh_output_dir = os.path.join("./output/coarse_mesh", args.scene_path.split("/")[-2])
+            # Fallback: use a hash of the path as directory name
+            import hashlib
+            scene_hash = hashlib.md5(args.scene_path.encode()).hexdigest()[:8]
+            args.mesh_output_dir = os.path.join("./output/coarse_mesh", f"scene_{scene_hash}")
     mesh_output_dir = args.mesh_output_dir
     os.makedirs(mesh_output_dir, exist_ok=True)
             
@@ -166,7 +174,7 @@ def extract_mesh_from_coarse_sugar(args):
             sugar._sh_coordinates_rest[...] = nerfmodel.gaussians._features_rest.detach()
     else:
         CONSOLE.print(f"\nLoading the coarse SuGaR model from path {sugar_checkpoint_path}...")
-        checkpoint = torch.load(sugar_checkpoint_path, map_location=nerfmodel.device)
+        checkpoint = torch.load(sugar_checkpoint_path, map_location=nerfmodel.device, weights_only=False)
         colors = SH2RGB(checkpoint['state_dict']['_sh_coordinates_dc'][:, 0, :])
         sugar = SuGaR(
             nerfmodel=nerfmodel,
@@ -392,10 +400,20 @@ def extract_mesh_from_coarse_sugar(args):
                     o3d_fg_mesh, o3d_fg_densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
                         fg_pcd, depth=poisson_depth) #, width=0, scale=1.1, linear_fit=False)  # depth=10 should be the default value? 11 is good to (but it starts to make a big number of triangles)
 
+                    # Check if mesh has triangles
+                    if len(o3d_fg_mesh.triangles) == 0:
+                        raise ValueError(f"Poisson reconstruction failed: generated mesh has no triangles! "
+                                       f"Point cloud has {len(fg_pcd.points)} points. "
+                                       f"Try adjusting the bounding box or use different surface level parameters.")
+
                     if vertices_density_quantile > 0.:
                         CONSOLE.print("Removing vertices with low densities...")
                         vertices_to_remove = o3d_fg_densities < np.quantile(o3d_fg_densities, vertices_density_quantile)
                         o3d_fg_mesh.remove_vertices_by_mask(vertices_to_remove)
+                        # Check if mesh still has triangles after removing low-density vertices
+                        if len(o3d_fg_mesh.triangles) == 0:
+                            raise ValueError(f"All vertices were removed due to low density! "
+                                           f"Try lowering vertices_density_quantile (current={vertices_density_quantile}).")
                 else:
                     CONSOLE.print("\n[WARNING] Foreground is empty.")
                     o3d_fg_mesh = None
@@ -506,17 +524,30 @@ def extract_mesh_from_coarse_sugar(args):
                         decimated_o3d_mesh.remove_duplicated_triangles()
                         decimated_o3d_mesh.remove_non_manifold_edges()
                         CONSOLE.print("Projection done.")
-                    
+
                     if use_vanilla_3dgs:
                         sugar_mesh_path = 'sugarmesh_vanilla3dgs_levelZZ_decimAA.ply'
                     else:
-                        sugar_mesh_path = 'sugarmesh_' + sugar_checkpoint_path.split('/')[-2].replace('sugarcoarse_', '') + '_levelZZ_decimAA.ply'
+                        # Extract the checkpoint directory name properly
+                        # sugar_checkpoint_path is a file path like ".../checkpoint_dir/15000.pt"
+                        # We need to extract "checkpoint_dir"
+                        checkpoint_parent = os.path.dirname(os.path.normpath(sugar_checkpoint_path))
+                        checkpoint_dir = os.path.basename(checkpoint_parent)
+                        # Remove the 'sugarcoarse_' prefix if present
+                        if checkpoint_dir.startswith('sugarcoarse_'):
+                            checkpoint_dir = checkpoint_dir.replace('sugarcoarse_', '', 1)
+                        sugar_mesh_path = f'sugarmesh_{checkpoint_dir}_levelZZ_decimAA.ply'
                     sugar_mesh_path = sugar_mesh_path.replace(
                         'ZZ', str(surface_level).replace('.', '')
                         ).replace(
                             'AA', str(decimation_target).replace('.', '')
                             )
                     sugar_mesh_path = os.path.join(mesh_output_dir, sugar_mesh_path)
+
+                    # Ensure the directory exists before writing
+                    sugar_mesh_dir = os.path.dirname(sugar_mesh_path)
+                    os.makedirs(sugar_mesh_dir, exist_ok=True)
+
                     o3d.io.write_triangle_mesh(sugar_mesh_path, decimated_o3d_mesh, write_triangle_uvs=True, write_vertex_colors=True, write_vertex_normals=True)
                     CONSOLE.print("Mesh saved at", sugar_mesh_path)
                     all_sugar_mesh_paths.append(sugar_mesh_path)
@@ -574,10 +605,20 @@ def extract_mesh_from_coarse_sugar(args):
                 o3d_fg_mesh, o3d_fg_densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
                     fg_pcd, depth=poisson_depth) #, width=0, scale=1.1, linear_fit=False)  # depth=10 should be the default value? 11 is good to (but it starts to make a big number of triangles)
 
+                # Check if mesh has triangles
+                if len(o3d_fg_mesh.triangles) == 0:
+                    raise ValueError(f"Poisson reconstruction failed: generated mesh has no triangles! "
+                                   f"Point cloud has {len(fg_pcd.points)} points. "
+                                   f"Try adjusting the bounding box or use different surface level parameters.")
+
                 if vertices_density_quantile > 0.:
                     CONSOLE.print("Removing vertices with low densities...")
                     vertices_to_remove = o3d_fg_densities < np.quantile(o3d_fg_densities, vertices_density_quantile)
                     o3d_fg_mesh.remove_vertices_by_mask(vertices_to_remove)
+                    # Check if mesh still has triangles after removing low-density vertices
+                    if len(o3d_fg_mesh.triangles) == 0:
+                        raise ValueError(f"All vertices were removed due to low density! "
+                                       f"Try lowering vertices_density_quantile (current={vertices_density_quantile}).")
                 
                 # ---Compute background mesh---
                 if bg_points.shape[0] > 0:
@@ -645,11 +686,24 @@ def extract_mesh_from_coarse_sugar(args):
                     if use_vanilla_3dgs:
                         sugar_mesh_path = 'sugarmesh_vanilla3dgs_poissoncenters_decimAA.ply'
                     else:
-                        sugar_mesh_path = 'sugarmesh_' + sugar_checkpoint_path.split('/')[-2].replace('sugarcoarse_', '') + '_poissoncenters_decimAA.ply'
+                        # Extract the checkpoint directory name properly
+                        # sugar_checkpoint_path is a file path like ".../checkpoint_dir/15000.pt"
+                        # We need to extract "checkpoint_dir"
+                        checkpoint_parent = os.path.dirname(os.path.normpath(sugar_checkpoint_path))
+                        checkpoint_dir = os.path.basename(checkpoint_parent)
+                        # Remove the 'sugarcoarse_' prefix if present
+                        if checkpoint_dir.startswith('sugarcoarse_'):
+                            checkpoint_dir = checkpoint_dir.replace('sugarcoarse_', '', 1)
+                        sugar_mesh_path = f'sugarmesh_{checkpoint_dir}_poissoncenters_decimAA.ply'
                     sugar_mesh_path = sugar_mesh_path.replace(
                             'AA', str(decimation_target).replace('.', '')
                             )
                     sugar_mesh_path = os.path.join(mesh_output_dir, sugar_mesh_path)
+
+                    # Ensure the directory exists before writing
+                    sugar_mesh_dir = os.path.dirname(sugar_mesh_path)
+                    os.makedirs(sugar_mesh_dir, exist_ok=True)
+
                     o3d.io.write_triangle_mesh(sugar_mesh_path, decimated_o3d_mesh, write_triangle_uvs=True, write_vertex_colors=True, write_vertex_normals=True)
                     CONSOLE.print("Mesh saved at", sugar_mesh_path)
                     all_sugar_mesh_paths.append(sugar_mesh_path)
@@ -778,13 +832,26 @@ def extract_mesh_from_coarse_sugar(args):
         if use_vanilla_3dgs:
             sugar_mesh_path = 'sugarmesh_vanilla3dgsmarchingcubes_levelZZ_decimAA.ply'
         else:
-            sugar_mesh_path = 'sugarmesh_' + sugar_checkpoint_path.split('/')[-2].replace('sugarcoarse_', '') + 'marchingcubes_levelZZ_decimAA.ply'
+            # Extract the checkpoint directory name properly
+            # sugar_checkpoint_path is a file path like ".../checkpoint_dir/15000.pt"
+            # We need to extract "checkpoint_dir"
+            checkpoint_parent = os.path.dirname(os.path.normpath(sugar_checkpoint_path))
+            checkpoint_dir = os.path.basename(checkpoint_parent)
+            # Remove the 'sugarcoarse_' prefix if present
+            if checkpoint_dir.startswith('sugarcoarse_'):
+                checkpoint_dir = checkpoint_dir.replace('sugarcoarse_', '', 1)
+            sugar_mesh_path = f'sugarmesh_{checkpoint_dir}_marchingcubes_levelZZ_decimAA.ply'
         sugar_mesh_path = sugar_mesh_path.replace(
             'ZZ', str(surface_level).replace('.', '')
             ).replace(
                 'AA', str(decimation_target).replace('.', '')
                 )
         sugar_mesh_path = os.path.join(mesh_output_dir, sugar_mesh_path)
+
+        # Ensure the directory exists before writing
+        sugar_mesh_dir = os.path.dirname(sugar_mesh_path)
+        os.makedirs(sugar_mesh_dir, exist_ok=True)
+
         o3d.io.write_triangle_mesh(sugar_mesh_path, decimated_o3d_mesh, write_triangle_uvs=True, write_vertex_colors=True, write_vertex_normals=True)
         CONSOLE.print("Mesh saved at", sugar_mesh_path)
         all_sugar_mesh_paths.append(sugar_mesh_path)

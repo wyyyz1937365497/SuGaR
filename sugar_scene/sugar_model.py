@@ -344,7 +344,13 @@ class SuGaR(nn.Module):
             
             # First gather vertices of all triangles
             faces_verts = self._points[self._surface_mesh_faces]  # n_faces, 3, n_coords
-            
+
+            # Check if mesh has triangles
+            if len(faces_verts) == 0:
+                raise ValueError(f"Cannot bind to mesh: mesh has no triangles! "
+                               f"Surface mesh has {len(self._surface_mesh_faces)} faces. "
+                               f"Check that the coarse mesh was extracted successfully.")
+
             # Then, compute initial scales
             scales = (faces_verts - faces_verts[:, [1, 2, 0]]).norm(dim=-1).min(dim=-1)[0] * self.surface_triangle_circle_radius
             scales = scales.clamp_min(0.0000001).reshape(len(faces_verts), -1, 1).expand(-1, self.n_gaussians_per_surface_triangle, 2).clone().reshape(-1, 2)
@@ -2399,7 +2405,7 @@ def load_refined_model(refined_sugar_path, nerfmodel:GaussianSplattingWrapper, d
         if nerfmodel is None:
             raise ValueError("You must provide a device if nerfmodel is None.")
         device = nerfmodel.device
-    checkpoint = torch.load(refined_sugar_path, map_location=device)
+    checkpoint = torch.load(refined_sugar_path, map_location=device, weights_only=False)
     n_faces = checkpoint['state_dict']['_surface_mesh_faces'].shape[0]
     n_gaussians = checkpoint['state_dict']['_scales'].shape[0]
     n_gaussians_per_surface_triangle = n_gaussians // n_faces
@@ -2449,7 +2455,7 @@ def load_rc_model(
     use_grid_for_light_probes=False,
     ):
 
-    checkpoint = torch.load(rc_path, map_location=nerfmodel.device)
+    checkpoint = torch.load(rc_path, map_location=nerfmodel.device, weights_only=False)
     
     if retrocompatibility:
         if not '_points' in checkpoint['state_dict'].keys():
