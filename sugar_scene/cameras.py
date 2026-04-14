@@ -3,7 +3,6 @@ import json
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from PIL import Image
 
 from pytorch3d.renderer import FoVPerspectiveCameras as P3DCameras
@@ -530,46 +529,6 @@ class CamerasWrapper:
             self._p3d_cameras = self._p3d_cameras.to(device)
 
         return self
-
-    def rescale_output_resolution(self, scaling_factor: float):
-        """Rescale camera output resolution and corresponding GT tensors.
-
-        Args:
-            scaling_factor (float): Multiplicative factor for width/height.
-                Values < 1 downscale, values > 1 upscale.
-        """
-        if scaling_factor <= 0:
-            raise ValueError("scaling_factor must be > 0")
-
-        # Update wrapper intrinsics in pixel units.
-        self.fx = self.fx * scaling_factor
-        self.fy = self.fy * scaling_factor
-        self.cx = self.cx * scaling_factor
-        self.cy = self.cy * scaling_factor
-
-        # Update per-camera image tensors and cached sizes.
-        for gs_camera in self.gs_cameras:
-            old_h = int(gs_camera.image_height)
-            old_w = int(gs_camera.image_width)
-            new_h = max(1, int(round(old_h * scaling_factor)))
-            new_w = max(1, int(round(old_w * scaling_factor)))
-
-            gs_camera.image_height = new_h
-            gs_camera.image_width = new_w
-
-            if hasattr(gs_camera, "original_image") and gs_camera.original_image is not None:
-                img = gs_camera.original_image.unsqueeze(0)
-                img = F.interpolate(img, size=(new_h, new_w), mode="bilinear", align_corners=False)
-                gs_camera.original_image = img.squeeze(0)
-
-        # Refresh cached integer width/height arrays from cameras.
-        device = self.device
-        self.width = torch.tensor(np.array([cam.image_width for cam in self.gs_cameras]), dtype=torch.int, device=device)
-        self.height = torch.tensor(np.array([cam.image_height for cam in self.gs_cameras]), dtype=torch.int, device=device)
-
-        # Intrinsics/camera matrices changed in pixel space.
-        self._p3d_cameras_computed = False
-        self._p3d_cameras = None
         
     def get_spatial_extent(self):
         """Returns the spatial extent of the cameras, computed as 

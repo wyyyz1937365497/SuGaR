@@ -25,52 +25,32 @@ def extract_mesh_and_texture_from_refined_sugar(args):
     gs_checkpoint_path = args.checkpoint_path
     if gs_checkpoint_path[-1] != os.sep:
         gs_checkpoint_path = gs_checkpoint_path + os.sep
-
+    
     # --- Fine model parameters ---
     refined_model_path = args.refined_model_path
     if args.n_gaussians_per_surface_triangle is None:
-        # Extract directory name properly, handling both / and \ separators
-        refined_dir = os.path.basename(os.path.normpath(refined_model_path))
-        n_gaussians_per_surface_triangle = int(refined_dir.split('_gaussperface')[-1])
+        n_gaussians_per_surface_triangle = int(refined_model_path.split('/')[-2].split('_gaussperface')[-1])
     else:
         n_gaussians_per_surface_triangle = args.n_gaussians_per_surface_triangle
-
+    
     # --- Output parameters ---
     if args.mesh_output_dir is None:
-        # Use os.path.basename to get the scene name, handling both / and \ separators
-        scene_name = os.path.basename(os.path.normpath(args.scene_path))
-        if len(scene_name) == 0:
-            # If basename is empty, try the parent directory
-            scene_name = os.path.basename(os.path.dirname(os.path.normpath(args.scene_path)))
-        if len(scene_name) > 0:
-            args.mesh_output_dir = os.path.join("./output/refined_mesh", scene_name)
+        if len(args.scene_path.split("/")[-1]) > 0:
+            args.mesh_output_dir = os.path.join("./output/refined_mesh", args.scene_path.split("/")[-1])
         else:
-            # Fallback: use a hash of the path as directory name
-            import hashlib
-            scene_hash = hashlib.md5(args.scene_path.encode()).hexdigest()[:8]
-            args.mesh_output_dir = os.path.join("./output/refined_mesh", f"scene_{scene_hash}")
+            args.mesh_output_dir = os.path.join("./output/refined_mesh", args.scene_path.split("/")[-2])
     mesh_output_dir = args.mesh_output_dir
     os.makedirs(mesh_output_dir, exist_ok=True)
-
-    # Extract directory name properly
-    mesh_save_path = os.path.basename(os.path.normpath(refined_model_path))
+    
+    mesh_save_path = refined_model_path.split('/')[-2]
     if args.postprocess_mesh:
         mesh_save_path = mesh_save_path + '_postprocessed'
     mesh_save_path = mesh_save_path + '.obj'
     mesh_save_path = os.path.join(mesh_output_dir, mesh_save_path)
-
-    # Get scene name properly
-    scene_name = os.path.basename(os.path.normpath(source_path))
-    if len(scene_name) == 0:
-        scene_name = os.path.basename(os.path.dirname(os.path.normpath(source_path)))
-
-    # Extract coarse mesh path properly
-    # refined_model_path might be a file path (like ".../checkpoint_dir/15000.pt")
-    # We need to extract the directory name
-    refined_model_parent = os.path.dirname(os.path.normpath(refined_model_path))
-    refined_dir = os.path.basename(refined_model_parent)
-    sugar_coarse_mesh_name = refined_dir.split('_normalconsistency')[0].replace('sugarfine', 'sugarmesh') + '.ply'
-    sugar_mesh_path = os.path.join('./output/coarse_mesh/', scene_name, sugar_coarse_mesh_name)
+    
+    scene_name = source_path.split('/')[-2] if len(source_path.split('/')[-1]) == 0 else source_path.split('/')[-1]
+    sugar_mesh_path = os.path.join('./output/coarse_mesh/', scene_name, 
+                                refined_model_path.split('/')[-2].split('_normalconsistency')[0].replace('sugarfine', 'sugarmesh') + '.ply')
     
     if args.square_size is None:
         if n_gaussians_per_surface_triangle == 1:
@@ -128,7 +108,7 @@ def extract_mesh_and_texture_from_refined_sugar(args):
     o3d_mesh = o3d.io.read_triangle_mesh(sugar_mesh_path)
     
     # --- Loading refined SuGaR model ---
-    checkpoint = torch.load(refined_model_path, map_location=nerfmodel.device, weights_only=False)
+    checkpoint = torch.load(refined_model_path, map_location=nerfmodel.device)
     refined_sugar = SuGaR(
         nerfmodel=nerfmodel,
         points=checkpoint['state_dict']['_points'],

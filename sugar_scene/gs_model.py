@@ -256,10 +256,7 @@ class GaussianSplattingWrapper:
         Args:
             downscale_factor (float): Factor by which to downscale the resolution.
         """
-        if hasattr(self.training_cameras, "rescale_output_resolution"):
-            self.training_cameras.rescale_output_resolution(1.0 / downscale_factor)
-        else:
-            print("Warning: CamerasWrapper has no rescale_output_resolution; skipping downscale.")
+        self.training_cameras.rescale_output_resolution(1.0 / downscale_factor)
     
     def generate_point_cloud(self):
         """Generate a point cloud from the Gaussian Splatting model.

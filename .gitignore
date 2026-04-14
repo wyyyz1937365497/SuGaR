@@ -1,6 +1,3 @@
-data/
-.vscode/
-.claude/
 *.pt
 *.pth
 output*

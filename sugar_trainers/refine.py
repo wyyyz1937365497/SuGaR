@@ -23,7 +23,7 @@ def refined_training(args):
     detect_anomaly = False
 
     # -----Data parameters-----
-    downscale_resolution_factor = 2  # 2, 4
+    downscale_resolution_factor = 1  # 2, 4
 
     # -----Model parameters-----
     use_eval_split = True
@@ -230,18 +230,10 @@ def refined_training(args):
     # ====================End of parameters====================
 
     if args.output_dir is None:
-        # Use os.path.basename to get the scene name, handling both / and \ separators
-        scene_name = os.path.basename(os.path.normpath(args.scene_path))
-        if len(scene_name) == 0:
-            # If basename is empty, try the parent directory
-            scene_name = os.path.basename(os.path.dirname(os.path.normpath(args.scene_path)))
-        if len(scene_name) > 0:
-            args.output_dir = os.path.join("./output/refined", scene_name)
+        if len(args.scene_path.split("/")[-1]) > 0:
+            args.output_dir = os.path.join("./output/refined", args.scene_path.split("/")[-1])
         else:
-            # Fallback: use a hash of the path as directory name
-            import hashlib
-            scene_hash = hashlib.md5(args.scene_path.encode()).hexdigest()[:8]
-            args.output_dir = os.path.join("./output/refined", f"scene_{scene_hash}")
+            args.output_dir = os.path.join("./output/refined", args.scene_path.split("/")[-2])
             
     # Bounding box
     if (args.bboxmin is None) or (args.bboxmin == 'None'):
@@ -268,11 +260,7 @@ def refined_training(args):
     source_path = args.scene_path
     gs_checkpoint_path = args.checkpoint_path
     surface_mesh_to_bind_path = args.mesh_path
-    # Normalize the path to handle mixed separators and ensure consistent format
-    surface_mesh_to_bind_path = os.path.normpath(surface_mesh_to_bind_path)
-    # Extract mesh filename without extension, properly handling both / and \ separators
-    mesh_filename = os.path.basename(surface_mesh_to_bind_path)
-    mesh_name = os.path.splitext(mesh_filename)[0]  # Remove extension
+    mesh_name = surface_mesh_to_bind_path.split("/")[-1].split(".")[0]
     iteration_to_load = args.iteration_to_load    
     
     surface_mesh_normal_consistency_factor = args.normal_consistency_factor    
@@ -395,12 +383,6 @@ def refined_training(args):
         CONSOLE.print(f'\nLoading mesh to bind to: {surface_mesh_to_bind_full_path}...')
         o3d_mesh = o3d.io.read_triangle_mesh(surface_mesh_to_bind_full_path)
         CONSOLE.print("Mesh to bind to loaded.")
-
-        # Validate mesh has triangles
-        if len(o3d_mesh.triangles) == 0:
-            raise ValueError(f"Mesh file has no triangles! {len(o3d_mesh.vertices)} vertices, 0 triangles. "
-                           f"The coarse mesh extraction may have failed. Check the coarse_mesh extraction logs.")
-        CONSOLE.print(f"Mesh validation passed: {len(o3d_mesh.vertices)} vertices, {len(o3d_mesh.triangles)} triangles.")
     else:
         o3d_mesh = None
         learn_surface_mesh_positions = False
@@ -892,38 +874,16 @@ def refined_training(args):
                     )
 
     CONSOLE.print("Final model saved.")
-
+    
     if export_ply_at_the_end:
-        # Build path using pathlib for cross-platform compatibility
+        # Build path
         CONSOLE.print("\nExporting ply file with refined Gaussians...")
-        from pathlib import Path
-
-        # Convert to Path object and get components
-        model_path_obj = Path(model_path)
-        path_parts = list(model_path_obj.parts)
-
-        # Ensure we have enough parts to modify
-        if len(path_parts) >= 4:
-            # Replace the 4th from last directory with 'refined_ply'
-            path_parts[-4] = 'refined_ply'
-            # Remove the filename and add .ply extension
-            path_parts[-1] = Path(path_parts[-1]).stem + '.ply'
-
-            # Reconstruct the path
-            refined_ply_save_path = Path(*path_parts)
-            refined_ply_save_dir = refined_ply_save_path.parent
-
-            # Convert back to string if needed
-            refined_ply_save_path = str(refined_ply_save_path)
-            refined_ply_save_dir = str(refined_ply_save_dir)
-        else:
-            # Fallback: use a simpler path structure
-            # Extract parent directory and create refined_ply subdirectory
-            parent_dir = model_path_obj.parent.parent
-            refined_ply_save_dir = parent_dir / 'refined_ply'
-            refined_ply_save_path = refined_ply_save_dir / f'{model_path_obj.stem}.ply'
-            refined_ply_save_dir = str(refined_ply_save_dir)
-            refined_ply_save_path = str(refined_ply_save_path)
+        tmp_list = model_path.split(os.sep)
+        tmp_list[-4] = 'refined_ply'
+        tmp_list.pop(-1)
+        tmp_list[-1] = tmp_list[-1] + '.ply'
+        refined_ply_save_dir = os.path.join(*tmp_list[:-1])
+        refined_ply_save_path = os.path.join(*tmp_list)
         
         os.makedirs(refined_ply_save_dir, exist_ok=True)
         
