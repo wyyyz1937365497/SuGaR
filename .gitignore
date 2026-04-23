@@ -10,7 +10,7 @@ sugar_sh_tests.ipynb
 dev_render_blender_scene.py
 test_environment.yml
 blender/dev_mode.py
-
+data/
 # To remove
 frosting*
 extract_shell.py

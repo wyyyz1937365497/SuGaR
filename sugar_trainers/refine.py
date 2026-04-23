@@ -230,10 +230,8 @@ def refined_training(args):
     # ====================End of parameters====================
 
     if args.output_dir is None:
-        if len(args.scene_path.split("/")[-1]) > 0:
-            args.output_dir = os.path.join("./output/refined", args.scene_path.split("/")[-1])
-        else:
-            args.output_dir = os.path.join("./output/refined", args.scene_path.split("/")[-2])
+        scene_name = os.path.basename(os.path.normpath(args.scene_path))
+        args.output_dir = os.path.join("output", "refined", scene_name)
             
     # Bounding box
     if (args.bboxmin is None) or (args.bboxmin == 'None'):
@@ -260,7 +258,7 @@ def refined_training(args):
     source_path = args.scene_path
     gs_checkpoint_path = args.checkpoint_path
     surface_mesh_to_bind_path = args.mesh_path
-    mesh_name = surface_mesh_to_bind_path.split("/")[-1].split(".")[0]
+    mesh_name = os.path.splitext(os.path.basename(surface_mesh_to_bind_path))[0]
     iteration_to_load = args.iteration_to_load    
     
     surface_mesh_normal_consistency_factor = args.normal_consistency_factor    
@@ -282,11 +280,17 @@ def refined_training(args):
     
     use_eval_split = args.eval
     use_white_background = args.white_background
-    
+
     export_ply_at_the_end = args.export_ply
-    
+
+    # Skip if checkpoint already exists
+    skip_checkpoint = os.path.join(sugar_checkpoint_path, f'{num_iterations}.pt')
+    if os.path.exists(skip_checkpoint):
+        print(f"Refined SuGaR checkpoint already exists at {skip_checkpoint}. Skipping...")
+        return skip_checkpoint
+
     ply_path = os.path.join(source_path, "sparse/0/points3D.ply")
-    
+
     CONSOLE.print("-----Parsed parameters-----")
     CONSOLE.print("Source path:", source_path)
     CONSOLE.print("   > Content:", len(os.listdir(source_path)))
@@ -305,8 +309,13 @@ def refined_training(args):
     CONSOLE.print("Use white background:", use_white_background)
     CONSOLE.print("Export ply at the end:", export_ply_at_the_end)
     CONSOLE.print("----------------------------")
-    
+
     # Setup device
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is not available. Check GPU and CUDA installation.")
+    if num_device >= torch.cuda.device_count():
+        print(f"Warning: GPU {num_device} not available ({torch.cuda.device_count()} GPU(s) found). Using device 0.")
+        num_device = 0
     torch.cuda.set_device(num_device)
     CONSOLE.print("Using device:", num_device)
     device = torch.device(f'cuda:{num_device}')

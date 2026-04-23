@@ -69,10 +69,8 @@ def extract_mesh_from_coarse_sugar(args):
     
     # Mesh output dir
     if args.mesh_output_dir is None:
-        if len(args.scene_path.split("/")[-1]) > 0:
-            args.mesh_output_dir = os.path.join("./output/coarse_mesh", args.scene_path.split("/")[-1])
-        else:
-            args.mesh_output_dir = os.path.join("./output/coarse_mesh", args.scene_path.split("/")[-2])
+        scene_name = os.path.basename(os.path.normpath(args.scene_path))
+        args.mesh_output_dir = os.path.join("output", "coarse_mesh", scene_name)
     mesh_output_dir = args.mesh_output_dir
     os.makedirs(mesh_output_dir, exist_ok=True)
             
@@ -123,6 +121,11 @@ def extract_mesh_from_coarse_sugar(args):
     CONSOLE.print("--------------------")
     
     # Set the GPU
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is not available. Check GPU and CUDA installation.")
+    if args.gpu >= torch.cuda.device_count():
+        print(f"Warning: GPU {args.gpu} not available ({torch.cuda.device_count()} GPU(s) found). Using device 0.")
+        args.gpu = 0
     torch.cuda.set_device(args.gpu)
     
     # Load the initial 3DGS model
@@ -510,7 +513,7 @@ def extract_mesh_from_coarse_sugar(args):
                     if use_vanilla_3dgs:
                         sugar_mesh_path = 'sugarmesh_vanilla3dgs_levelZZ_decimAA.ply'
                     else:
-                        sugar_mesh_path = 'sugarmesh_' + sugar_checkpoint_path.split('/')[-2].replace('sugarcoarse_', '') + '_levelZZ_decimAA.ply'
+                        sugar_mesh_path = 'sugarmesh_' + os.path.basename(os.path.normpath(sugar_checkpoint_path)).replace('sugarcoarse_', '') + '_levelZZ_decimAA.ply'
                     sugar_mesh_path = sugar_mesh_path.replace(
                         'ZZ', str(surface_level).replace('.', '')
                         ).replace(
@@ -645,7 +648,7 @@ def extract_mesh_from_coarse_sugar(args):
                     if use_vanilla_3dgs:
                         sugar_mesh_path = 'sugarmesh_vanilla3dgs_poissoncenters_decimAA.ply'
                     else:
-                        sugar_mesh_path = 'sugarmesh_' + sugar_checkpoint_path.split('/')[-2].replace('sugarcoarse_', '') + '_poissoncenters_decimAA.ply'
+                        sugar_mesh_path = 'sugarmesh_' + os.path.basename(os.path.normpath(sugar_checkpoint_path)).replace('sugarcoarse_', '') + '_poissoncenters_decimAA.ply'
                     sugar_mesh_path = sugar_mesh_path.replace(
                             'AA', str(decimation_target).replace('.', '')
                             )
@@ -778,7 +781,7 @@ def extract_mesh_from_coarse_sugar(args):
         if use_vanilla_3dgs:
             sugar_mesh_path = 'sugarmesh_vanilla3dgsmarchingcubes_levelZZ_decimAA.ply'
         else:
-            sugar_mesh_path = 'sugarmesh_' + sugar_checkpoint_path.split('/')[-2].replace('sugarcoarse_', '') + 'marchingcubes_levelZZ_decimAA.ply'
+            sugar_mesh_path = 'sugarmesh_' + os.path.basename(os.path.normpath(sugar_checkpoint_path)).replace('sugarcoarse_', '') + 'marchingcubes_levelZZ_decimAA.ply'
         sugar_mesh_path = sugar_mesh_path.replace(
             'ZZ', str(surface_level).replace('.', '')
             ).replace(

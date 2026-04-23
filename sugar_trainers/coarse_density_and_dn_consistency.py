@@ -317,10 +317,8 @@ def coarse_training_with_density_regularization_and_dn_consistency(args):
     # ====================End of parameters====================
 
     if args.output_dir is None:
-        if len(args.scene_path.split("/")[-1]) > 0:
-            args.output_dir = os.path.join("./output/coarse", args.scene_path.split("/")[-1])
-        else:
-            args.output_dir = os.path.join("./output/coarse", args.scene_path.split("/")[-2])
+        scene_name = os.path.basename(os.path.normpath(args.scene_path))
+        args.output_dir = os.path.join("output", "coarse", scene_name)
             
     source_path = args.scene_path
     gs_checkpoint_path = args.checkpoint_path
@@ -339,9 +337,15 @@ def coarse_training_with_density_regularization_and_dn_consistency(args):
     
     use_eval_split = args.eval
     use_white_background = args.white_background
-    
+
+    # Skip if checkpoint already exists
+    skip_checkpoint = os.path.join(sugar_checkpoint_path, '15000.pt')
+    if os.path.exists(skip_checkpoint):
+        print(f"Coarse density+dn_consistency checkpoint already exists at {skip_checkpoint}. Skipping...")
+        return skip_checkpoint
+
     ply_path = os.path.join(source_path, "sparse/0/points3D.ply")
-    
+
     CONSOLE.print("-----Parsed parameters-----")
     CONSOLE.print("Source path:", source_path)
     CONSOLE.print("   > Content:", len(os.listdir(source_path)))
@@ -356,8 +360,13 @@ def coarse_training_with_density_regularization_and_dn_consistency(args):
     CONSOLE.print("Eval split:", use_eval_split)
     CONSOLE.print("White background:", use_white_background)
     CONSOLE.print("---------------------------")
-    
+
     # Setup device
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is not available. Check GPU and CUDA installation.")
+    if num_device >= torch.cuda.device_count():
+        print(f"Warning: GPU {num_device} not available ({torch.cuda.device_count()} GPU(s) found). Using device 0.")
+        num_device = 0
     torch.cuda.set_device(num_device)
     CONSOLE.print("Using device:", num_device)
     device = torch.device(f'cuda:{num_device}')

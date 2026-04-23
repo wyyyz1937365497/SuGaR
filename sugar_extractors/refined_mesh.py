@@ -1,4 +1,5 @@
 import os
+import glob
 import open3d as o3d
 import torch
 from pytorch3d.renderer import TexturesUV
@@ -6,7 +7,7 @@ from pytorch3d.structures import Meshes
 from pytorch3d.ops import knn_points
 from pytorch3d.io import save_obj
 from sugar_scene.gs_model import GaussianSplattingWrapper
-from sugar_scene.sugar_model import SuGaR, extract_texture_image_and_uv_from_gaussians
+from sugar_scene.sugar_model import SuGaR, extract_texture_image_and_uv_from_gaussians, load_refined_model
 from sugar_utils.spherical_harmonics import SH2RGB
 
 from rich.console import Console
@@ -23,34 +24,86 @@ def extract_mesh_and_texture_from_refined_sugar(args):
     # --- Vanilla 3DGS parameters ---
     iteration_to_load = args.iteration_to_load
     gs_checkpoint_path = args.checkpoint_path
-    if gs_checkpoint_path[-1] != os.sep:
-        gs_checkpoint_path = gs_checkpoint_path + os.sep
+    gs_checkpoint_path = os.path.normpath(gs_checkpoint_path) + os.sep
     
     # --- Fine model parameters ---
     refined_model_path = args.refined_model_path
+    scene_name = os.path.basename(os.path.normpath(source_path))
+
+    # Resolve refined checkpoint path robustly.
+    # Supports direct .pt paths, directory paths containing checkpoints,
+    # and short names like "15000.pt" by searching output/refined/<scene>.
+    refined_model_path = os.path.normpath(refined_model_path)
+    if os.path.isdir(refined_model_path):
+        pt_candidates = sorted(glob.glob(os.path.join(refined_model_path, '*.pt')))
+        if len(pt_candidates) == 0:
+            raise FileNotFoundError(f"No .pt checkpoint found in directory: {refined_model_path}")
+        refined_model_path = pt_candidates[-1]
+    elif not os.path.exists(refined_model_path):
+        refined_name = os.path.basename(refined_model_path)
+        refined_scene_dir = os.path.join('output', 'refined', scene_name)
+        recursive_candidates = sorted(glob.glob(os.path.join(refined_scene_dir, '**', refined_name), recursive=True))
+        if len(recursive_candidates) == 1:
+            CONSOLE.print(
+                f"[yellow]Warning:[/yellow] Refined checkpoint '{args.refined_model_path}' not found, "
+                f"using '{recursive_candidates[0]}' instead."
+            )
+            refined_model_path = os.path.normpath(recursive_candidates[0])
+        elif len(recursive_candidates) > 1:
+            raise FileNotFoundError(
+                f"Refined checkpoint '{args.refined_model_path}' is ambiguous. "
+                f"Multiple matches found under {refined_scene_dir}: {recursive_candidates}"
+            )
+        else:
+            raise FileNotFoundError(
+                f"Refined checkpoint not found: {args.refined_model_path}. "
+                f"Expected a valid .pt path, or a file under {refined_scene_dir}."
+            )
+
     if args.n_gaussians_per_surface_triangle is None:
-        n_gaussians_per_surface_triangle = int(refined_model_path.split('/')[-2].split('_gaussperface')[-1])
+        n_gaussians_per_surface_triangle = int(os.path.basename(os.path.normpath(refined_model_path)).split('_gaussperface')[-1])
     else:
         n_gaussians_per_surface_triangle = args.n_gaussians_per_surface_triangle
     
     # --- Output parameters ---
     if args.mesh_output_dir is None:
-        if len(args.scene_path.split("/")[-1]) > 0:
-            args.mesh_output_dir = os.path.join("./output/refined_mesh", args.scene_path.split("/")[-1])
-        else:
-            args.mesh_output_dir = os.path.join("./output/refined_mesh", args.scene_path.split("/")[-2])
+        scene_name = os.path.basename(os.path.normpath(args.scene_path))
+        args.mesh_output_dir = os.path.join("output", "refined_mesh", scene_name)
     mesh_output_dir = args.mesh_output_dir
     os.makedirs(mesh_output_dir, exist_ok=True)
     
-    mesh_save_path = refined_model_path.split('/')[-2]
+    mesh_save_path = os.path.basename(os.path.normpath(refined_model_path))
     if args.postprocess_mesh:
         mesh_save_path = mesh_save_path + '_postprocessed'
     mesh_save_path = mesh_save_path + '.obj'
     mesh_save_path = os.path.join(mesh_output_dir, mesh_save_path)
     
-    scene_name = source_path.split('/')[-2] if len(source_path.split('/')[-1]) == 0 else source_path.split('/')[-1]
-    sugar_mesh_path = os.path.join('./output/coarse_mesh/', scene_name, 
-                                refined_model_path.split('/')[-2].split('_normalconsistency')[0].replace('sugarfine', 'sugarmesh') + '.ply')
+    # Resolve the coarse mesh path robustly.
+    # `refined_model_path` can be either a checkpoint file (e.g. .../15000.pt)
+    # or a refine directory. For checkpoints, derive from parent directory.
+    sugar_mesh_path = getattr(args, 'mesh_path', None)
+    if sugar_mesh_path is not None:
+        sugar_mesh_path = os.path.normpath(sugar_mesh_path)
+    else:
+        refined_model_path_norm = os.path.normpath(refined_model_path)
+        model_dir_name = os.path.basename(refined_model_path_norm)
+        if os.path.isfile(refined_model_path_norm):
+            model_dir_name = os.path.basename(os.path.dirname(refined_model_path_norm))
+
+        sugar_mesh_filename = model_dir_name.split('_normalconsistency')[0].replace('sugarfine', 'sugarmesh') + '.ply'
+        sugar_mesh_path = os.path.join('output', 'coarse_mesh', scene_name, sugar_mesh_filename)
+
+    if not os.path.exists(sugar_mesh_path):
+        coarse_scene_dir = os.path.join('output', 'coarse_mesh', scene_name)
+        fallback_candidates = sorted(glob.glob(os.path.join(coarse_scene_dir, '*.ply')))
+        if len(fallback_candidates) == 1:
+            CONSOLE.print(f"[yellow]Warning:[/yellow] Coarse mesh not found at '{sugar_mesh_path}', using '{fallback_candidates[0]}' instead.")
+            sugar_mesh_path = fallback_candidates[0]
+        else:
+            CONSOLE.print(
+                f"[yellow]Warning:[/yellow] Coarse mesh not found: {sugar_mesh_path}. "
+                "Will load mesh topology directly from refined checkpoint instead."
+            )
     
     if args.square_size is None:
         if n_gaussians_per_surface_triangle == 1:
@@ -104,24 +157,22 @@ def extract_mesh_and_texture_from_refined_sugar(args):
     CONSOLE.print(f'The model has been trained for {iteration_to_load} steps.')
     CONSOLE.print(len(nerfmodel.gaussians._xyz) / 1e6, "M gaussians detected.")
     
-    # --- Loading coarse mesh ---
-    o3d_mesh = o3d.io.read_triangle_mesh(sugar_mesh_path)
-    
     # --- Loading refined SuGaR model ---
-    checkpoint = torch.load(refined_model_path, map_location=nerfmodel.device)
-    refined_sugar = SuGaR(
+    # Use checkpoint-native loading to reconstruct the exact mesh topology used in refinement.
+    # This avoids size mismatches when external coarse meshes differ by simplification or cleaning.
+    refined_sugar = load_refined_model(
+        refined_sugar_path=refined_model_path,
         nerfmodel=nerfmodel,
-        points=checkpoint['state_dict']['_points'],
-        colors=SH2RGB(checkpoint['state_dict']['_sh_coordinates_dc'][:, 0, :]),
-        initialize=False,
-        sh_levels=nerfmodel.gaussians.active_sh_degree+1,
-        keep_track_of_knn=False,
-        knn_to_track=0,
-        beta_mode='average',
-        surface_mesh_to_bind=o3d_mesh,
-        n_gaussians_per_surface_triangle=n_gaussians_per_surface_triangle,
+        device=nerfmodel.device,
+    )
+    if (args.n_gaussians_per_surface_triangle is not None) and (
+        refined_sugar.n_gaussians_per_surface_triangle != args.n_gaussians_per_surface_triangle
+    ):
+        CONSOLE.print(
+            f"[yellow]Warning:[/yellow] Requested n_gaussians_per_surface_triangle={args.n_gaussians_per_surface_triangle}, "
+            f"but checkpoint uses {refined_sugar.n_gaussians_per_surface_triangle}. Using checkpoint value."
         )
-    refined_sugar.load_state_dict(checkpoint['state_dict'])
+    n_gaussians_per_surface_triangle = refined_sugar.n_gaussians_per_surface_triangle
     refined_sugar.eval()
     
     if postprocess_mesh:

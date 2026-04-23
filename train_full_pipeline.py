@@ -109,27 +109,26 @@ if __name__ == "__main__":
         
     # Output directory for the vanilla 3DGS checkpoint
     if args.gs_output_dir is None:
-        sep = os.path.sep
-        if len(args.scene_path.split(sep)[-1]) > 0:
-            gs_checkpoint_dir = os.path.join("output", "vanilla_gs", args.scene_path.split(sep)[-1])
-        else:
-            gs_checkpoint_dir = os.path.join("output", "vanilla_gs", args.scene_path.split(sep)[-2])
-        gs_checkpoint_dir = gs_checkpoint_dir + sep
+        scene_name = os.path.basename(os.path.normpath(args.scene_path))
+        gs_checkpoint_dir = os.path.join("output", "vanilla_gs", scene_name)
+        os.makedirs(gs_checkpoint_dir, exist_ok=True)
 
-        # Trains a 3DGS scene for 7k iterations
-        white_background_str = '-w ' if args.white_background else ''
-        os.system(
-            f"CUDA_VISIBLE_DEVICES={args.gpu} python ./gaussian_splatting/train.py \
-                -s {args.scene_path} \
-                -m {gs_checkpoint_dir} \
-                {white_background_str}\
-                --iterations 7_000"
-        )
+        if os.path.exists(os.path.join(gs_checkpoint_dir, "cameras.json")):
+            print("Vanilla 3DGS checkpoint already exists. Skipping...")
+        else:
+            # Trains a 3DGS scene for 7k iterations
+            white_background_str = '-w ' if args.white_background else ''
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
+            os.system(
+                f"python ./gaussian_splatting/train.py \
+                    -s {args.scene_path} \
+                    -m {gs_checkpoint_dir} \
+                    {white_background_str}\
+                    --iterations 7_000"
+            )
     else:
         print("A vanilla 3DGS checkpoint was provided. Skipping the vanilla 3DGS optimization.")
-        gs_checkpoint_dir = args.gs_output_dir
-        if gs_checkpoint_dir[-1] != os.path.sep:
-            gs_checkpoint_dir += os.path.sep
+        gs_checkpoint_dir = os.path.normpath(args.gs_output_dir)
     
     # Runs the train.py python script with the given arguments
     os.system(

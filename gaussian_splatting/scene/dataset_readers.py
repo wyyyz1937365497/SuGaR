@@ -17,6 +17,7 @@ from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec
     read_extrinsics_binary, read_intrinsics_binary, read_points3D_binary, read_points3D_text
 from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
 import numpy as np
+import cv2
 import json
 from pathlib import Path
 from plyfile import PlyData, PlyElement
@@ -91,12 +92,28 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
             focal_length_y = intr.params[1]
             FovY = focal2fov(focal_length_y, height)
             FovX = focal2fov(focal_length_x, width)
+        elif intr.model=="OPENCV":
+            # OPENCV params: [fx, fy, cx, cy, k1, k2, p1, p2]
+            focal_length_x = intr.params[0]
+            focal_length_y = intr.params[1]
+            FovY = focal2fov(focal_length_y, height)
+            FovX = focal2fov(focal_length_x, width)
         else:
             assert False, "Colmap camera model not handled: only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
 
         image_path = os.path.join(images_folder, os.path.basename(extr.name))
         image_name = os.path.basename(image_path).split(".")[0]
         image = Image.open(image_path)
+
+        # Undistort images for OPENCV camera model
+        if intr.model == "OPENCV":
+            fx, fy, cx, cy = intr.params[0], intr.params[1], intr.params[2], intr.params[3]
+            k1, k2, p1, p2 = intr.params[4], intr.params[5], intr.params[6], intr.params[7]
+            camera_matrix = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float64)
+            dist_coeffs = np.array([k1, k2, p1, p2], dtype=np.float64)
+            img_np = np.array(image)
+            undistorted = cv2.undistort(img_np, camera_matrix, dist_coeffs)
+            image = Image.fromarray(undistorted)
 
         cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
                               image_path=image_path, image_name=image_name, width=width, height=height)

@@ -1,3 +1,4 @@
+import os
 import argparse
 from sugar_utils.general_utils import str2bool
 from sugar_trainers.coarse_density import coarse_training_with_density_regularization
@@ -154,7 +155,17 @@ if __name__ == "__main__":
         'use_marching_cubes': False,
         'use_vanilla_3dgs': False,
     })
-    coarse_mesh_path = extract_mesh_from_coarse_sugar(coarse_mesh_args)[0]
+    # Check if coarse mesh already exists
+    scene_name = os.path.basename(os.path.normpath(args.scene_path))
+    mesh_output_dir = os.path.join("output", "coarse_mesh", scene_name)
+    coarse_folder = os.path.basename(os.path.normpath(os.path.dirname(coarse_sugar_path)))
+    mesh_filename = f"sugarmesh_{coarse_folder.replace('sugarcoarse_', '')}_level{str(args.surface_level).replace('.', '')}_decim{str(args.n_vertices_in_mesh).replace('.', '')}.ply"
+    expected_mesh_path = os.path.join(mesh_output_dir, mesh_filename)
+    if os.path.exists(expected_mesh_path):
+        print(f"Coarse mesh already exists at {expected_mesh_path}. Skipping...")
+        coarse_mesh_path = expected_mesh_path
+    else:
+        coarse_mesh_path = extract_mesh_from_coarse_sugar(coarse_mesh_args)[0]
     
     
     # ----- Refine SuGaR -----
@@ -175,24 +186,44 @@ if __name__ == "__main__":
         'gpu': args.gpu,
         'white_background': args.white_background,
     })
-    refined_sugar_path = refined_training(refined_args)
+    # Check if refined checkpoint already exists
+    mesh_name = os.path.splitext(os.path.basename(coarse_mesh_path))[0]
+    refined_folder = f"sugarfine_{mesh_name.replace('sugarmesh_', '')}_normalconsistency01_gaussperface{args.gaussians_per_triangle}"
+    refined_output_dir = os.path.join("output", "refined", scene_name)
+    expected_refined = os.path.join(refined_output_dir, refined_folder, f"{args.refinement_iterations}.pt")
+    if os.path.exists(expected_refined):
+        print(f"Refined SuGaR checkpoint already exists. Skipping...")
+        refined_sugar_path = expected_refined
+    else:
+        refined_sugar_path = refined_training(refined_args)
     
     
     # ----- Extract mesh and texture from refined SuGaR -----
     if args.export_uv_textured_mesh:
-        refined_mesh_args = AttrDict({
-            'scene_path': args.scene_path,
-            'iteration_to_load': args.iteration_to_load,
-            'checkpoint_path': args.checkpoint_path,
-            'refined_model_path': refined_sugar_path,
-            'mesh_output_dir': None,
-            'n_gaussians_per_surface_triangle': args.gaussians_per_triangle,
-            'square_size': args.square_size,
-            'eval': args.eval,
-            'gpu': args.gpu,
-            'postprocess_mesh': args.postprocess_mesh,
-            'postprocess_density_threshold': args.postprocess_density_threshold,
-            'postprocess_iterations': args.postprocess_iterations,
-        })
-        refined_mesh_path = extract_mesh_and_texture_from_refined_sugar(refined_mesh_args)
+        # Check if refined mesh already exists
+        refined_mesh_output_dir = os.path.join("output", "refined_mesh", scene_name)
+        refined_mesh_name = os.path.basename(os.path.normpath(refined_sugar_path))
+        if args.postprocess_mesh:
+            refined_mesh_name = refined_mesh_name + '_postprocessed'
+        expected_refined_mesh = os.path.join(refined_mesh_output_dir, refined_mesh_name + '.obj')
+
+        if os.path.exists(expected_refined_mesh):
+            print(f"Refined mesh already exists at {expected_refined_mesh}. Skipping...")
+        else:
+            refined_mesh_args = AttrDict({
+                'scene_path': args.scene_path,
+                'iteration_to_load': args.iteration_to_load,
+                'checkpoint_path': args.checkpoint_path,
+                'refined_model_path': refined_sugar_path,
+                'mesh_path': coarse_mesh_path,
+                'mesh_output_dir': None,
+                'n_gaussians_per_surface_triangle': args.gaussians_per_triangle,
+                'square_size': args.square_size,
+                'eval': args.eval,
+                'gpu': args.gpu,
+                'postprocess_mesh': args.postprocess_mesh,
+                'postprocess_density_threshold': args.postprocess_density_threshold,
+                'postprocess_iterations': args.postprocess_iterations,
+            })
+            refined_mesh_path = extract_mesh_and_texture_from_refined_sugar(refined_mesh_args)
         
