@@ -340,7 +340,7 @@ if __name__ == "__main__":
                                 )
                             refined_sugar_path = os.path.join(refined_sugar_path, f'{refinement_iterations}.pt')
                             CONSOLE.print(f"Loading SuGaR model config {refined_sugar_path}...")
-                            checkpoint = torch.load(refined_sugar_path, map_location=nerfmodel_30k.device)
+                            checkpoint = torch.load(refined_sugar_path, map_location=nerfmodel_30k.device,weights_only=False)
                             refined_sugar = SuGaR(
                                 nerfmodel=nerfmodel_30k,
                                 points=checkpoint['state_dict']['_points'],
